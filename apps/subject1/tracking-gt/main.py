@@ -46,6 +46,12 @@ def load_rois():
 
 FPS = 30
 BASE_TIME = datetime(1900, 1, 1, 12, 0, 0)
+VEHICLE_TYPE = {
+    'Two-Wheeler': ['bicycle', 'motorbike'],
+    'Small': ['car', 'van'],
+    'Large': ['bus', 'truck'],
+    'Pedestrian': ['pedestrian'],
+}
 
 def format_time(frame_count):
     seconds = frame_count // FPS
@@ -57,6 +63,7 @@ def load_json_files(directory, rois):
     trajectory_data = {}
     obj_id_map = {}
 
+    # First pass: collect all trajectories and check if they ever enter a lane
     for json_file in json_files:
         stream_name = json_file.split('.')[0]
         stream_id = next((i for i, v in ROI_CONSTRAINT.items() if v == stream_name), None)
@@ -75,11 +82,20 @@ def load_json_files(directory, rois):
                             sequence_id = result['id']
                             obj_id = obj_id_map.setdefault((stream_id, sequence_id), len(obj_id_map) + 1)
                             
+                            vehicle_category = result.get('value', {}).get('labels', ['unknown'])[0]
+                            vehicle_type = next((category for category, types in VEHICLE_TYPE.items() 
+                                                  if vehicle_category in types), 'Unknown')
+                            
+                            # Process all frames first to check if object ever enters a lane
                             frames = []
+                            ever_in_lane = False
                             for frame_idx, bbox in enumerate(result['value']['sequence']):
                                 original_bbox = bbox['x'], bbox['y'], bbox['width'], bbox['height']
                                 normalized_bbox = normalize_bbox(original_bbox)
                                 position = check_bbox_position(normalized_bbox, rois[stream_name])
+                                
+                                if position['lane'] is not None:
+                                    ever_in_lane = True
                                 
                                 frames.append({
                                     'frame_idx': frame_idx,
@@ -87,48 +103,55 @@ def load_json_files(directory, rois):
                                     'position': position
                                 })
                             
-                            trajectory_data[obj_id] = {
-                                'stream_id': stream_id,
-                                'stream_name': stream_name,
-                                'frames': frames,
-                                'first_appear_frame': frames[0]['frame_idx'],
-                                'last_appear_frame': frames[-1]['frame_idx'],
-                                'lane_frame': None,
-                                'stopline_frame': None
-                            }
-                            
-                            # Find the first frame where object enters a lane
-                            for frame in frames:
-                                if frame['position']['lane'] is not None:
-                                    trajectory_data[obj_id]['lane_frame'] = frame['frame_idx']
-                                    break
-                            
-                            # Find the frame where object reaches stopline (if applicable)
-                            for frame in frames:
-                                if frame['position'].get('stopline'):
-                                    trajectory_data[obj_id]['stopline_frame'] = frame['frame_idx']
-                                    break
+                            # Only store trajectory if object ever enters a lane
+                            if ever_in_lane:
+                                # Track lane status from beginning
+                                current_lane = None
+                                lane_history = []
+                                
+                                for frame in frames:
+                                    if frame['position']['lane'] is not None:
+                                        current_lane = frame['position']['lane']
+                                    frame['position']['current_lane'] = current_lane
+                                    lane_history.append(current_lane)
+                                
+                                trajectory_data[obj_id] = {
+                                    'stream_id': stream_id,
+                                    'stream_name': stream_name,
+                                    'frames': frames,
+                                    'first_appear_frame': frames[0]['frame_idx'],
+                                    'last_appear_frame': frames[-1]['frame_idx'],
+                                    'lane_frame': None,
+                                    'stopline_frame': None,
+                                    'vehicle_type': vehicle_type,
+                                    'lane_history': lane_history
+                                }
+                                
+                                # Find the first frame where object enters a lane
+                                for frame in frames:
+                                    if frame['position']['lane'] is not None:
+                                        trajectory_data[obj_id]['lane_frame'] = frame['frame_idx']
+                                        break
+                                
+                                # Find the frame where object reaches stopline (if applicable)
+                                for frame in frames:
+                                    if frame['position'].get('stopline'):
+                                        trajectory_data[obj_id]['stopline_frame'] = frame['frame_idx']
+                                        break
 
     summary_rows = []
     frame_rows = []
 
     for obj_id, trajectory in trajectory_data.items():
-        # Get all non-None directions from the trajectory
         directions = [frame['position']['direction'] for frame in trajectory['frames'] 
                      if frame['position']['direction'] is not None]
         
-        # If we found any direction (left or right), use the most common one
-        if directions:
-            direction = max(set(directions), key=directions.count)
-        else:
-            # If no left/right direction was found, set as 'straight'
-            direction = 'straight'
+        direction = max(set(directions), key=directions.count) if directions else 'straight'
         
-        lanes = [frame['position']['lane'] for frame in trajectory['frames'] 
-                if frame['position']['lane'] is not None]
+        # Use the most common lane from lane_history
+        lanes = [lane for lane in trajectory['lane_history'] if lane is not None]
         lane = max(set(lanes), key=lanes.count) if lanes else 'N/A'
         
-        # Format times
         first_appear_time = format_time(trajectory['first_appear_frame'])
         last_appear_time = format_time(trajectory['last_appear_frame'])
         lane_time = format_time(trajectory['lane_frame']) if trajectory['lane_frame'] is not None else 'N/A'
@@ -142,30 +165,33 @@ def load_json_files(directory, rois):
             stopline_time,
             last_appear_time,
             lane.split('lane')[-1] if lane != 'N/A' else 'N/A',
-            direction
+            trajectory['vehicle_type'],
+            direction,
         ])
         
         for frame in trajectory['frames']:
             bbox = frame['bbox']
+            current_lane = frame['position']['current_lane']
             frame_rows.append([
                 obj_id,
                 trajectory['stream_id'],
                 trajectory['stream_name'],
                 frame['frame_idx'],
                 bbox[0], bbox[1], bbox[2], bbox[3],
-                frame['position']['lane'].split('lane')[-1] if frame['position']['lane'] else 'N/A'
+                current_lane.split('lane')[-1] if current_lane else 'N/A'
             ])
 
     with open('trajectory_summary.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Object ID", "Stream ID", "First-Appeared Time", "In-Lane Time", 
-                        "Reach-StopLine Time", "Last-Appear Time", "Lane", "Direction"])
+        writer.writerow(["Vehicle ID", "Stream ID", "First-Appeared Time", "In-Lane Time", 
+                        "Reach-StopLine Time", "Last-Appear Time", "Lane ID",
+                        "Vehicle Type", "Direction"])
         writer.writerows(summary_rows)
 
     with open('trajectory_frames.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Object ID", "Stream ID", "Stream Name", "Frame Index", 
-                        "X", "Y", "Width", "Height", "Lane"])
+        writer.writerow(["Vehicle ID", "Stream ID", "Stream Name", "Frame Index", 
+                        "X", "Y", "Width", "Height", "Lane ID"])
         writer.writerows(frame_rows)
 
     print("Files written: trajectory_summary.csv, trajectory_frames.csv")

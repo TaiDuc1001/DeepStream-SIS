@@ -10,7 +10,7 @@
 // Configuration
 const int NUM_CLASSES   = 7;
 const int NUM_CHANNELS  = 12;  // [cx, cy, log_w, log_h, obj_conf, cls0,...,cls6]
-const float CONF_THRESH = 0.3f;
+const float CONF_THRESH = 0.7f;
 const float NMS_THRESH  = 0.6f;
 const std::vector<int> STRIDES = {8, 16, 32};
 

@@ -7,3 +7,7 @@ file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/DongKhoi_MacThiB
 file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/RachBungBinh_NguyenThong_2.mp4 \
 file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/TranHungDao_NguyenVanCu.mp4 \
 file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/TranKhacChan_TranQuangKhai.mp4
+# file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/tracking/DongKhoi_MacThiBuoi.mp4 \
+# file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/tracking/RachBungBinh_NguyenThong_2.mp4 \
+# file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/tracking/TranHungDao_NguyenVanCu.mp4 \
+# file:///home/nvidia/deepstream_python_apps/apps/subject1/videos/tracking/TranKhacChan_TranQuangKhai.mp4 \

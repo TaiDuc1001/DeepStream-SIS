@@ -17,3 +17,8 @@ apps/subject1/*.jpg
 apps/subject1/*.png
 apps/subject1/*.log
 apps/subject1/*.tex
+
+apps/subject1/report
+
+apps/subject1/metrics/*.png
+apps/subject1/metrics/*.csv

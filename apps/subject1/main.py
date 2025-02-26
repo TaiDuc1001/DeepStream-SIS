@@ -21,6 +21,8 @@ import pyds
 import os
 from collections import OrderedDict
 import datetime
+import math
+from collections import defaultdict
 
 
 
@@ -42,13 +44,6 @@ SOURCES_NAMES = []
 
 with open('labels.txt', 'r') as f:
     labels = f.readlines()
-
-ROI_CONSTRAINT = {
-    'source0': 'DongKhoi_MacThiBuoi',
-    'source1': 'RachBungBinh_NguyenThong_2',
-    'source2': 'TranHungDao_NguyenVanCu',
-    'source3': 'TranKhacChan_TranQuangKhai',
-}
 
 ROIS = {}
 for i, file in enumerate(os.listdir('rois')):
@@ -144,16 +139,26 @@ VEHICLE_TYPE = {
     'Pedestrian': ['pedestrian'],
 }
 
+def create_time_lookup(max_frames=100000):
+    lookup = {}
+    for frame_count in range(0, max_frames, FPS):
+        seconds = frame_count // FPS
+        t = base_time + datetime.timedelta(seconds=seconds)
+        lookup[frame_count] = t.strftime("%H:%M:%S")
+    return lookup
+TIME_LOOKUP = create_time_lookup()
+
+
 def format_time(frame_count):
-    seconds = frame_count // FPS
-    t = base_time + datetime.timedelta(seconds=seconds)
-    return t.strftime("%H:%M:%S")
+    # Round to nearest FPS multiple for lookup
+    key = (frame_count // FPS) * FPS
+    return TIME_LOOKUP.get(key, "00:00:00")
 
 def write_analysis(inner_func):
     def wrapper(*args, **kwargs):
         inner_func(*args, **kwargs)
         with open('directions.csv', 'w') as f:
-            f.write("Vehicle ID, Stream ID, First-Appeared Time, In-Lane Time, Reach-StopLine Time, Last-Appear Time, Lane ID, Vehicle Type, Direction\n")
+            f.write("Vehicle ID,Stream ID,First-Appeared Time,In-Lane Time,Reach-StopLine Time,Last-Appear Time,Lane ID,Vehicle Type,Direction\n")
             sorted_keys = sorted(
                 global_direction_history.keys(),
                 key=lambda x: x[1]
@@ -169,23 +174,30 @@ def write_analysis(inner_func):
                 direction = global_direction_history.get(key, "")
                 vehicle_type = global_vehicle_type.get(key, "").strip()
                 vehicle_type = next((k for k, v in VEHICLE_TYPE.items() if vehicle_type in v), "")
-                if lane_id and vehicle_type and stopline_time_str:
-                    lane_id = lane_id.split('lane')[-1]
-                    f.write(f"{obj_id},{source_id},{init_time_str},{lane_time_str},{stopline_time_str},{last_appear_str},{lane_id},{vehicle_type},{direction}\n")
+                # if lane_id and vehicle_type and stopline_time_str:
+                lane_id = lane_id.split('lane')[-1]
+                f.write(f"{obj_id},{source_id},{init_time_str},{lane_time_str},{stopline_time_str},{last_appear_str},{lane_id},{vehicle_type},{direction}\n")
     return wrapper
+
+# Replace global frame counter with per-source frame counters
+source_frame_numbers = defaultdict(int)
 
 @write_analysis
 def analytics(l_obj, frame_meta, REGIONS, REGION_COLORS, labels, obj_counter, source_name):
     global obj_history, global_direction_history, frame_history, global_lane_history
-    global global_init_time, global_lane_time, global_frame_number, global_vehicle_type, global_stopline_time, global_last_appear
-    global_frame_number += 1
+    global global_init_time, global_lane_time, global_frame_number, global_vehicle_type
+    global global_stopline_time, global_last_appear
+    global source_frame_numbers
+    
+    # Increment frame number for this source
+    source_frame_numbers[source_name] += 1
+    current_frame = source_frame_numbers[source_name]
     
     if source_name not in REGIONS:
         return global_direction_history
         
     region_data = REGIONS[source_name]
     lane_keys = [key for key in region_data if 'lane' in key]
-    current_keys = set()
     
     # Pre-calculate tiler parameters once
     tiler_rows = int(math.sqrt(number_sources))
@@ -196,47 +208,38 @@ def analytics(l_obj, frame_meta, REGIONS, REGION_COLORS, labels, obj_counter, so
     source_x = (source_index % tiler_columns) * tile_width
     source_y = (source_index // tiler_columns) * tile_height
 
-    # Process objects in batches
-    obj_batch = []
+    # Process objects
     current_obj = l_obj
     while current_obj:
         obj_meta = pyds.NvDsObjectMeta.cast(current_obj.data)
-        obj_batch.append(obj_meta)
-        current_obj = current_obj.next
-
-    # Process batch in parallel
-    for obj_meta in obj_batch:
         obj_id = obj_meta.object_id
         key = (source_name, obj_id)
-        current_keys.add(key)
         
         rect = obj_meta.rect_params
         bottom_middle_x = rect.left + rect.width / 2
         bottom_middle_y = rect.top + rect.height
 
-        # Initialize object data only if needed
+        # Initialize object data if needed
         if key not in obj_history:
             obj_history[key] = False
             global_direction_history[key] = "unknown"
             frame_history[key] = 0
             global_lane_history[key] = ""
-            global_init_time[key] = global_frame_number
+            global_init_time[key] = current_frame
             global_vehicle_type[key] = labels[obj_meta.class_id]
 
         # Check lanes
-        for lane in lane_keys:
-            if obj_history[key]:
-                break
-                
-            line_a, line_b = region_data[lane]
-            if is_point_between_lines(bottom_middle_x, bottom_middle_y, line_a, line_b):
-                obj_history[key] = True
-                global_lane_history[key] = lane
-                if key not in global_lane_time:
-                    global_lane_time[key] = global_frame_number
-                obj_meta.rect_params.border_color.set(*REGION_COLORS[lane])
-                obj_counter[labels[obj_meta.class_id]] += 1
-                break
+        if not obj_history[key]:
+            for lane in lane_keys:
+                line_a, line_b = region_data[lane]
+                if is_point_between_lines(bottom_middle_x, bottom_middle_y, line_a, line_b):
+                    obj_history[key] = True
+                    global_lane_history[key] = lane
+                    if key not in global_lane_time:
+                        global_lane_time[key] = current_frame
+                    obj_meta.rect_params.border_color.set(*REGION_COLORS[lane])
+                    obj_counter[labels[obj_meta.class_id]] += 1
+                    break
 
         # Process tracked objects
         if obj_history[key]:
@@ -244,7 +247,7 @@ def analytics(l_obj, frame_meta, REGIONS, REGION_COLORS, labels, obj_counter, so
                 stopline = region_data['stopline']
                 if is_point_reach_stopline(bottom_middle_x, bottom_middle_y, stopline):
                     if key not in global_stopline_time:
-                        global_stopline_time[key] = global_frame_number
+                        global_stopline_time[key] = current_frame
                     obj_meta.rect_params.border_color.set(*REGION_COLORS['stopline'])
             
             elif 'left' in region_data and global_direction_history[key] == "unknown":
@@ -267,15 +270,16 @@ def analytics(l_obj, frame_meta, REGIONS, REGION_COLORS, labels, obj_counter, so
         if (bottom_middle_x < source_x or bottom_middle_x > source_x + tile_width or 
             bottom_middle_y < source_y or bottom_middle_y > source_y + tile_height):
             frame_history[key] = frame_history.get(key, 0) + 1
-            if frame_history[key] >= 10:
-                global_last_appear[key] = global_frame_number
-            if frame_history[key] >= 30 and global_direction_history[key] == "unknown":
+            if frame_history[key] >= FRAME_DISAPPEAR_THRESHOLD:
+                global_last_appear[key] = current_frame
+            if frame_history[key] >= FRAME_HISTORY_THRESHOLD and global_direction_history[key] == "unknown":
                 global_direction_history[key] = "straight"
         else:
             frame_history[key] = 0
 
-    return global_direction_history
+        current_obj = current_obj.next
 
+    return global_direction_history
 
 def osd_sink_pad_buffer_probe(pad, info, u_data):
     buffer = info.get_buffer()
@@ -330,6 +334,7 @@ def tracker_src_pad_buffer_probe(pad, info, u_data):
     if not gst_buffer:
         print("Unable to get GstBuffer")
         return
+    
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_frame = batch_meta.frame_meta_list
     while l_frame is not None:
@@ -337,6 +342,7 @@ def tracker_src_pad_buffer_probe(pad, info, u_data):
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         except StopIteration:
             break
+            
         source_id = frame_meta.pad_index
         if source_id < len(SOURCES_NAMES):
             source_name = SOURCES_NAMES[source_id]
@@ -346,6 +352,7 @@ def tracker_src_pad_buffer_probe(pad, info, u_data):
         l_obj = frame_meta.obj_meta_list
         num_rects = frame_meta.num_obj_meta
         obj_counter = { label: 0 for label in labels }
+        
         analytics(l_obj, frame_meta, REGIONS, REGION_COLORS, labels, obj_counter, source_name)
         stream_index = "stream{0}".format(frame_meta.pad_index)
         global perf_data
@@ -509,11 +516,11 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
         sys.stderr.write("Unable to create nvosd\n")
     nvosd.set_property('process-mode', OSD_PROCESS_MODE)
     nvosd.set_property('display-text', OSD_DISPLAY_TEXT)
-    if file_loop:
-        if is_aarch64():
-            streammux.set_property('nvbuf-memory-type', 4)
-        else:
-            streammux.set_property('nvbuf-memory-type', 2)
+    # if file_loop:
+    #     if is_aarch64():
+    #         streammux.set_property('nvbuf-memory-type', 4)
+    #     else:
+    #         streammux.set_property('nvbuf-memory-type', 2)
     if no_display:
         print("Creating Fakesink")
         sink = Gst.ElementFactory.make("fakesink", "fakesink")
@@ -539,8 +546,8 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     streammux.set_property('height', 1080)
     streammux.set_property('batch-size', number_sources)
     streammux.set_property('batched-push-timeout', 40000)
-    streammux.set_property('buffer-pool-size', 4)
-    streammux.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+    streammux.set_property('buffer-pool-size', 8)
+    # streammux.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
     if requested_pgie == "nvinferserver" and config is not None:
         pgie.set_property('config-file-path', config)
     elif requested_pgie == "nvinferserver-grpc" and config is not None:
@@ -559,6 +566,8 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     tiler.set_property("columns", tiler_columns)
     tiler.set_property("width", TILED_OUTPUT_WIDTH)
     tiler.set_property("height", TILED_OUTPUT_HEIGHT)
+    # tiler.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+    tiler.set_property('gpu-id', 0)
     sink.set_property("qos", 0)
     print("Adding elements to Pipeline")
     pipeline.add(pgie)
@@ -611,8 +620,26 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     pipeline.set_state(Gst.State.NULL)
 
     # Add to vidconv, nvvidconv
-    vidconv.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
-    nvvidconv.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+    # vidconv.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+    # nvvidconv.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+
+    # Add queue properties
+    for queue in [queue1, queue2, queue3, queue4, queue5, queue6]:
+        queue.set_property('max-size-buffers', 4)
+        queue.set_property('max-size-bytes', 0)
+        queue.set_property('max-size-time', 0)
+        queue.set_property('leaky', 2)  # Downstream leaky
+
+    # For nvosd
+    nvosd.set_property('gpu-id', 0)
+    # nvosd.set_property('nvbuf-memory-type', 4 if is_aarch64() else 2)
+
+    # For sink (if using nveglglessink)
+    if not is_aarch64():
+        sink.set_property('sync', False)  # Disable sync
+        sink.set_property('max-lateness', -1)
+        sink.set_property('async', True)
+        sink.set_property('throttle-time', 0)
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="deepstream_test_3", description="deepstream-test3 multi stream, multi model inference reference app")
