@@ -3,25 +3,7 @@ bindings/build
 ltmain.sh
 
 .vscode
-apps/main
 rclone.conf
-apps/subject1/videos/*
-apps/subject1/*.csv
-apps/subject1/tracking-gt/*.json
-apps/subject1/tracking-gt/*.csv
-apps/subject1/tracking-gt/*.png
-apps/subject1/tracking-gt/*.jpg
-apps/subject1/models/*
-
-apps/subject1/*.jpg
-apps/subject1/*.png
-apps/subject1/*.log
-apps/subject1/*.tex
-
-apps/subject1/report
-
-apps/subject1/metrics/*.png
-apps/subject1/metrics/*.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
