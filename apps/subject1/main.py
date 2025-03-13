@@ -42,15 +42,15 @@ OSD_DISPLAY_TEXT = 0
 SOURCES_NAMES = []
 
 
-with open('labels.txt', 'r') as f:
+with open('settings/labels.txt', 'r') as f:
     labels = f.readlines()
 
 ROIS = {}
-for i, file in enumerate(os.listdir('rois')):
+for i, file in enumerate(os.listdir('settings/rois')):
     current_section = None
     key = file.split('.')[0]
     ROIS[key] = {}
-    with open(f'rois/{file}', 'r') as f:
+    with open(f'settings/rois/{file}', 'r') as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -157,7 +157,7 @@ def format_time(frame_count):
 def write_analysis(inner_func):
     def wrapper(*args, **kwargs):
         inner_func(*args, **kwargs)
-        with open('directions.csv', 'w') as f:
+        with open('output/directions.csv', 'w') as f:
             f.write("Vehicle ID,Stream ID,First-Appeared Time,In-Lane Time,Reach-StopLine Time,Last-Appear Time,Lane ID,Vehicle Type,Direction\n")
             sorted_keys = sorted(
                 global_direction_history.keys(),
@@ -555,7 +555,7 @@ def main(args, requested_pgie=None, config=None, disable_probe=False):
     elif requested_pgie == "nvinfer" and config is not None:
         pgie.set_property('config-file-path', config)
     else:
-        pgie.set_property('config-file-path', "config.txt")
+        pgie.set_property('config-file-path', "settings/config.txt")
     pgie_batch_size = pgie.get_property("batch-size")
     if pgie_batch_size != number_sources:
         print("WARNING: Overriding infer-config batch-size", pgie_batch_size, "with number of sources", number_sources)

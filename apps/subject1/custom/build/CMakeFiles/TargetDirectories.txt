@@ -1,3 +1,0 @@
-/home/nvidia/deepstream_python_apps/apps/subject1/custom/build/CMakeFiles/rebuild_cache.dir
-/home/nvidia/deepstream_python_apps/apps/subject1/custom/build/CMakeFiles/edit_cache.dir
-/home/nvidia/deepstream_python_apps/apps/subject1/custom/build/CMakeFiles/tensorrt_detection.dir
