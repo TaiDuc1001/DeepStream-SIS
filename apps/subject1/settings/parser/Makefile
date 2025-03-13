@@ -6,7 +6,7 @@ LIBS:= -lnvinfer -lnvparsers -lstdc++
 LFLAGS:= -Wl,--start-group $(LIBS) -Wl,--end-group
 
 TARGET_LIB:= libnvdsinfer_custom_bbox_parser.so
-SRCS:= p2.cpp
+SRCS:= p.cpp
 
 all: $(TARGET_LIB)
 

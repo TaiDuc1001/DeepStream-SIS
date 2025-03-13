@@ -1,0 +1,11 @@
+input/*
+!input/.gitkeep
+
+output/*
+!output/.gitkeep
+
+settings/rois/*
+settings/parser/*.so
+
+models/*
+!models/.gitkeep

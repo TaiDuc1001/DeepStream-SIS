@@ -2,9 +2,7 @@
 gpu-id=0
 net-scale-factor=0.0173520735727919486
 offsets=123.675;116.28;103.53
-#offsets=0.485;0.456;0.406
-onnx-file=models/detection_yolox_tiny_best.onnx
-model-engine-file=models/detection_yolox_tiny_best.onnx_b4_gpu0_fp32.engine
+model-engine-file=../models/detection_yolox_tiny_best.onnx_b4_gpu0_fp32.engine
 labelfile-path=labels.txt
 force-implicit-batch-dim=0
 batch-size=1
@@ -14,7 +12,7 @@ interval=0
 gie-unique-id=1
 output-blob-names=output
 parse-bbox-func-name=CustomParser
-custom-lib-path=custom/libnvdsinfer_custom_bbox_parser.so
+custom-lib-path=../settings/parser/libnvdsinfer_custom_bbox_parser.so
 model-color-format=0
 
 
